@@ -1,6 +1,23 @@
 ## -- PRIVATE FUNCTIONS BELOW HERE ------------------------------------------------------------------------------ #
 function _jld2(path::String)::Dict{String,Any}
-    return load(path);
+    # Prefer explicit JLD2 loader when possible so custom extensions (e.g. .kgm49)
+    # that contain JLD2-formatted bytes can still be read.
+    if isfile(path)
+        try
+            return JLD2.load(path)
+        catch
+            return FileIO.load(path)
+        end
+    end
+
+    # try alternate extension .kgm49 if original path used .jld2
+    alt = replace(path, r"\.jld2$" => ".kgm49")
+    if isfile(alt)
+        return JLD2.load(alt)
+    end
+
+    # final fallback: let FileIO provide the error for the original path
+    return FileIO.load(path)
 end
 # -- PRIVATE FUNCTIONS ABOVE HERE ------------------------------------------------------------------------------ #
 
@@ -30,14 +47,25 @@ MyTrainingMarketDataSet() = _jld2(joinpath(_PATH_TO_DATA, "SP500-Daily-OHLC-1-3-
 Load the ticker-picker bandit model results computed in the `Setup-L14a-Example-RiskAware-BBBP-Ticker-Picker-Fall-2025.ipynb` notebook.
 """
 function MyTickerPickerBanditModelResults(;mood::Symbol = :neutral)::Dict{String, Any}
-    if (mood == :optimistic) 
-        return _jld2(joinpath(_PATH_TO_DATA, "Ticker-Picker-Preferences-Optimistic-Fall-2025.jld2"));
-    elseif (mood == :pessimistic)
-        return _jld2(joinpath(_PATH_TO_DATA, "Ticker-Picker-Preferences-Pessimistic-Fall-2025.jld2"));
-    elseif (mood == :neutral)
-        return _jld2(joinpath(_PATH_TO_DATA, "Ticker-Picker-Preferences-Neutral-Fall-2025.jld2"));
+    valid = Set([:optimistic, :neutral, :pessimistic])
+    if !(mood in valid)
+        error("Invalid mood specified: $mood. Valid options are :optimistic, :neutral, :pessimistic.")
+    end
+
+    mood_name = uppercasefirst(String(mood))
+    base = joinpath(_PATH_TO_DATA, "Ticker-Picker-Preferences-$(mood_name)-Fall-2025")
+
+    # Try .kgm49 first (user requested custom extension), then .jld2
+    p_kgm = base * ".kgm49"
+    p_jld2 = base * ".jld2"
+
+    if isfile(p_kgm)
+        return _jld2(p_kgm)
+    elseif isfile(p_jld2)
+        return _jld2(p_jld2)
     else
-        error("Invalid mood specified: $mood. Valid options are :optimistic, :neutral, :pessimistic.");
+        # Provide a clear error message listing attempted paths
+        error("No preference file found for mood=$(mood). Tried: $(p_kgm) and $(p_jld2)")
     end
 end
 # -- PUBLIC FUNCTIONS ABOVE HERE ------------------------------------------------------------------------------ #
